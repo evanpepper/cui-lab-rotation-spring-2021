@@ -71,8 +71,6 @@ taxa <- cbind(expanded_otus$ID, expanded_otus$Kingdom, expanded_otus$Phylum,
 colnames(taxa) <- c("otuID", "Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
 taxa <- as.data.table(taxa)
 
-dt$PX = as.character(lapply(strsplit(as.character(dt$PREFIX), split="_"), "[", 1))
-
 taxa <- as.data.frame(taxa)
 rownames(taxa) <- taxa[,1]
 taxa <- taxa[,2:ncol(taxa)]
@@ -262,4 +260,48 @@ anova1 <- adonis2(formula = CD_bray_distances ~ timepoint + subject + treatment,
 
 anova2 <- adonis2(formula = CD_bray_distances ~ timepoint + treatment, data = df,
         permutations = 999, method = "bray", sqrt.dist = FALSE, add = FALSE, by = "margin")
+
+
+#####################################################################################################################
+### differential abundance with deseq2; https://joey711.github.io/phyloseq-extensions/DESeq2.html ###
+#####################################################################################################################
+
+# importing the library and printing package version
+library("DESeq2")
+packageVersion("DESeq2")
+
+# show what the phyloseq object holds again
+CD_physeq
+
+# writing for loop to go through each week, calculate differential abundances, and create plot for each week
+v.week_number <- c("Week 0", "Week 1", "Week 3", "Week 5", "Week 7", "Week 9")
+for (week in v.week_number) {
+  week_number <- as.character(lapply(strsplit(as.character(week), split = " "), "[", 2))
+  # subsetting phyloseq object to look closer at specific changes
+  CD_physeq_week <- subset_samples(CD_physeq, timepoint == week)
+  # convert to deseq object
+  treatment_diff = phyloseq_to_deseq2(CD_physeq_week, ~ treatment)
+  treatment_diff = DESeq(treatment_diff, test="Wald", fitType="parametric")
+  res = results(treatment_diff, cooksCutoff = FALSE)
+  alpha = 0.05
+  sigtab = res[which(res$padj < alpha), ]
+  sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(CD_physeq)[rownames(sigtab), ], "matrix"))
+  # plotting the differential abundances
+  theme_set(theme_bw())
+  scale_fill_discrete <- function(palname = "Set1", ...) {
+    scale_fill_brewer(palette = palname, ...)
+  }
+  # Phylum order
+  x = tapply(sigtab$log2FoldChange, sigtab$Phylum, function(x) max(x))
+  x = sort(x, TRUE)
+  sigtab$Phylum = factor(as.character(sigtab$Phylum), levels=names(x))
+  # Genus order
+  x = tapply(sigtab$log2FoldChange, sigtab$Genus, function(x) max(x))
+  x = sort(x, TRUE)
+  sigtab$Genus = factor(as.character(sigtab$Genus), levels=names(x))
+  diff_plot <- ggplot(sigtab, aes(x=Genus, y=log2FoldChange, color=Phylum)) + geom_point(size = 6) +
+    theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5), text = element_text(size = 18)) +
+    ggtitle(paste("Differential abundance between treatments and controls at ", week, sep = ""))
+  ggsave(paste("figures/cd-diff-abund-week-", week_number, ".png", sep = ""), diff_plot, height = 6.5, width = 11, units = "in")
+}
 
